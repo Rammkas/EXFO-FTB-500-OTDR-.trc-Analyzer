@@ -1,10 +1,10 @@
 // ==============================================================================
 // Program.cs — entry point and CLI of the exfo_trc_analyzer utility.
 //
-// USAGE:
+// USAGE (flags go before the input path):
 //   exfo_trc_analyzer.exe [folder_with_.trc]         — parse and write CSV reports
 //   exfo_trc_analyzer.exe <file.trc>                 — parse a single file
-//   exfo_trc_analyzer.exe ... --source_output on|off — where CSV reports are written:
+//   exfo_trc_analyzer.exe --source_output on|off <path> — where CSV reports are written:
 //       off (default): the application folder;
 //       on:            the folder containing the .trc files.
 //   exfo_trc_analyzer.exe --dump-keys <file.trc>     — format diagnostics: prints

@@ -38,6 +38,8 @@ dotnet build
 dotnet run --project ExfoTrcAnalyzer -- path/to/folder_with_trc_files
 # or a single file:
 dotnet run --project ExfoTrcAnalyzer -- path/to/file.trc
+# with options (flags go before the input path):
+dotnet run --project ExfoTrcAnalyzer -- --source_output on path/to/file.trc
 ```
 
 ### Command-line flags
@@ -48,7 +50,8 @@ dotnet run --project ExfoTrcAnalyzer -- path/to/file.trc
 | `--source_output on\|off` | `off` | Where the CSV reports are written: `off` = the application folder, `on` = the folder containing the `.trc` files |
 | `--dump-keys <file.trc>` | — | Format diagnostics mode (see below) |
 
-Flags may appear in any order relative to the input path.
+Flags go before the input path (the parser also tolerates them after it, but
+the documented convention is flags first).
 
 CSV reports are written to the current folder:
 
