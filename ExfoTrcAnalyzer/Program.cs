@@ -3,6 +3,7 @@
 //
 // USAGE:
 //   exfo_trc_analyzer.exe [folder_with_.trc]         — parse and write CSV reports
+//   exfo_trc_analyzer.exe <file.trc>                 — parse a single file
 //   exfo_trc_analyzer.exe --dump-keys <file.trc>     — format diagnostics: prints
 //       all EventTable and trace keys with values (needed to confirm EXFO field
 //       names when encountering a new .trc variant)
@@ -39,7 +40,7 @@ namespace ExfoTrcAnalyzer;
 // ==============================================================================
 // Thin CLI over the Config / TrcParser / Analyzer / Csv modules.
 // Usage:
-//   exfo_trc_analyzer.exe [folder_with_.trc]
+//   exfo_trc_analyzer.exe [folder_with_.trc | file.trc]
 //   exfo_trc_analyzer.exe --dump-keys <file.trc>   — format diagnostics
 // ==============================================================================
 internal static class Program
@@ -59,9 +60,33 @@ internal static class Program
             return;
         }
 
-        string inputDir = args.Length > 0 ? args[0] : ".";
+        string inputArg = args.Length > 0 ? args[0] : ".";
+
+        // Accept either a folder or a direct path to a single .trc file.
+        string inputDir;
+        string? singleFile = null;
+        if (File.Exists(inputArg))
+        {
+            if (!inputArg.EndsWith(".trc", StringComparison.OrdinalIgnoreCase))
+            {
+                Console.WriteLine($"[ERROR] The specified file is not a .trc file: {inputArg}");
+                return;
+            }
+            singleFile = Path.GetFullPath(inputArg);
+            inputDir = Path.GetDirectoryName(singleFile)!;
+        }
+        else if (Directory.Exists(inputArg))
+        {
+            inputDir = Path.GetFullPath(inputArg);
+        }
+        else
+        {
+            Console.WriteLine($"[ERROR] Path not found: {inputArg}");
+            return;
+        }
+
         Config.Load(inputDir);
-        ProcessFolder(inputDir);
+        ProcessFolder(inputDir, singleFile);
     }
 
     private static void DumpKeys(string filepath)
@@ -77,11 +102,22 @@ internal static class Program
     }
 
     // --------------------------------------------------------------------------
-    // Main folder processing
+    // Main folder processing (or a single explicitly given .trc file)
     // --------------------------------------------------------------------------
-    private static void ProcessFolder(string inputDir = ".")
+    private static void ProcessFolder(string inputDir, string? singleFile = null)
     {
-        var trcFiles = Directory.GetFiles(inputDir, "*.trc").OrderBy(f => f, StringComparer.Ordinal).ToList();
+        List<string> trcFiles;
+        try
+        {
+            trcFiles = singleFile != null
+                ? new List<string> { singleFile }
+                : Directory.GetFiles(inputDir, "*.trc").OrderBy(f => f, StringComparer.Ordinal).ToList();
+        }
+        catch (Exception e)
+        {
+            Console.WriteLine($"[ERROR] Failed to enumerate .trc files in '{inputDir}': {e.Message}");
+            return;
+        }
         if (trcFiles.Count == 0)
         {
             Console.WriteLine($"No .trc files found in folder '{inputDir}'");

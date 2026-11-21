@@ -36,6 +36,8 @@ Requires the .NET SDK 8.0 or newer.
 ```bash
 dotnet build
 dotnet run --project ExfoTrcAnalyzer -- path/to/folder_with_trc_files
+# or a single file:
+dotnet run --project ExfoTrcAnalyzer -- path/to/file.trc
 ```
 
 CSV reports are written to the current folder:
