@@ -27,6 +27,8 @@ thresholds and writes PASS/FAIL verdicts with reasons.
 - QC input-connector check (optional, `check_qc_connector`).
 - Warnings when the `has_buffer_spool` setting contradicts the actual trace.
 - `--dump-keys` diagnostic mode to inspect the raw EXFO field names of any file.
+- `--map` mode: ASCII schematic of the measured link with event markers and
+  detail tables.
 - 33 regression tests, including GOLD tests against real reference files.
 
 ## Build & run
@@ -49,11 +51,13 @@ dotnet run --project ExfoTrcAnalyzer -- --source_output on path/to/file.trc
 | *(positional)* | current folder | Folder with `.trc` files, or a single `.trc` file path |
 | `--source_output on\|off` | `off` | Where the CSV reports are written: `off` = the application folder, `on` = the folder containing the `.trc` files |
 | `--dump-keys <file.trc>` | — | Format diagnostics mode (see below) |
+| `--map <file.trc \| folder>` | — | ASCII link map mode (see below) |
 
 Flags go before the input path (the parser also tolerates them after it, but
 the documented convention is flags first).
 
-CSV reports are written to the current folder:
+CSV reports are written to the folder chosen by `--source_output`
+(`off` = application folder, `on` = folder with the `.trc` files):
 
 | File | Contents |
 |---|---|
@@ -72,6 +76,31 @@ dotnet run --project ExfoTrcAnalyzer -- --dump-keys file.trc
 
 Prints every `EventTable` key and trace key with values — useful when a new
 `.trc` variant from different EXFO firmware shows up.
+
+### Link map
+
+```bash
+dotnet run --project ExfoTrcAnalyzer -- --map file.trc   # or a folder of files
+```
+
+Prints a scaled ASCII schematic of the measured path built from the same
+analysis that produces the QC verdict:
+
+```
+=== Link map: fiber '9076' | verdict: PASS ===
+scale: 1 character ≈ 87.9 m
+
+0.0         1010.6
+|           |                                                                                |
+▐▒▒▒▒▒▒▒▒▒▒▒●══════════════════════════════════════════════════════════════════════════════════◆
+   1011 m                                          7337 m
+PORT       QC
+
+legend: ▐ port  ● QC connector  × splice  ◆ end of fiber | ▒ buffer spool  ═ fiber under test
+```
+
+followed by tables of all sections and events (loss / reflection / attenuation
+for both wavelengths) and the fiber-under-test totals with FAIL/WARNING reasons.
 
 ## Configuration (`otdr_config.txt`)
 

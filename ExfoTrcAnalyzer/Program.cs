@@ -10,6 +10,8 @@
 //   exfo_trc_analyzer.exe --dump-keys <file.trc>     — format diagnostics: prints
 //       all EventTable and trace keys with values (needed to confirm EXFO field
 //       names when encountering a new .trc variant)
+//   exfo_trc_analyzer.exe --map <file.trc | folder>  — ASCII link map: a scaled
+//       schematic of the measured path with event markers and detail tables
 //
 // WORKFLOW:
 //   1) Config.Load — settings from otdr_config.txt (or defaults + template creation);
@@ -93,6 +95,17 @@ internal static class Program
             return;
         }
 
+        if (positional.Count >= 1 && positional[0] == "--map")
+        {
+            if (positional.Count < 2)
+            {
+                Console.WriteLine("Usage: exfo_trc_analyzer.exe --map <file.trc | folder>");
+                return;
+            }
+            DumpMap(positional[1]);
+            return;
+        }
+
         string inputArg = positional.Count > 0 ? positional[0] : ".";
 
         // Accept either a folder or a direct path to a single .trc file.
@@ -134,6 +147,34 @@ internal static class Program
         catch (Exception e)
         {
             Console.WriteLine($"[ERROR] {filepath}: {e.Message}");
+        }
+    }
+
+    // --------------------------------------------------------------------------
+    // --map: ASCII schematic of the analyzed link (one file or a folder of files)
+    // --------------------------------------------------------------------------
+    private static void DumpMap(string path)
+    {
+        try
+        {
+            var files = new List<string>();
+            if (Directory.Exists(path))
+                files.AddRange(Directory.GetFiles(path, "*.trc").OrderBy(f => f, StringComparer.Ordinal));
+            else if (File.Exists(path))
+                files.Add(path);
+            else
+            {
+                Console.WriteLine($"[ERROR] Path not found: {path}");
+                return;
+            }
+
+            foreach (string file in files)
+                foreach (var f in Analyzer.AnalyzeFile(file))
+                    Console.WriteLine(MapRenderer.Render(f));
+        }
+        catch (Exception e)
+        {
+            Console.WriteLine($"[ERROR] {path}: {e.Message}");
         }
     }
 
