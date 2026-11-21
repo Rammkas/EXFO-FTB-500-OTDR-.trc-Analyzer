@@ -88,6 +88,7 @@ internal static class TestRunner
             ("GOLD 9077.trc", () => TestGolden("9077.trc", 7342.2, 2.406, 0.328, 7336.5, 1.365, 0.186, 0.152, 0.147)),
             ("GOLD 9084.trc", () => TestGolden("9084.trc", 7340.9, 2.427, 0.331, 7338.8, 1.353, 0.184, 0.259, 0.132)),
             ("GOLD 9085.trc", () => TestGolden("9085.trc", 7338.7, 2.432, 0.331, 7336.5, 1.372, 0.187, 0.480, 0.352)),
+            ("GOLD 9076.trc raw trace curves (--raw-trace)", TestRawTraceGolden),
         };
 
         int failed = 0;
@@ -653,6 +654,55 @@ internal static class TestRunner
                 return path;
         }
         return null;
+    }
+
+    // GOLD for the --raw-trace export: RawSamples blob encoding verified on
+    // 9076.trc — Int16 LE samples, 1024 counts per dB, uniform time axis
+    // (see RawTrace.cs file header for the cross-checks)
+    private static void TestRawTraceGolden()
+    {
+        string? path = FindGoldenFile("9076.trc");
+        if (path == null)
+        {
+            Console.WriteLine("  [SKIP] reference file not found (put .trc files in .\\reference_trc or set OTDR_TRC_DIR)");
+            return;
+        }
+
+        var curves = RawTrace.ReadCurves(path);
+        Check(curves.Count == 2, $"expected 2 trace curves, got {curves.Count}");
+        Check(curves[0].WavelengthNm == 1310 && curves[1].WavelengthNm == 1550,
+              $"wavelengths must be 1310/1550, got {curves[0].WavelengthNm}/{curves[1].WavelengthNm}");
+        Check(curves[0].SampleCount == 62682 && curves[1].SampleCount == 62682,
+              $"sample counts must be 62682, got {curves[0].SampleCount}/{curves[1].SampleCount}");
+        Check(curves[0].CountsPerDb == 1024, $"ScaleFactor must be 1024, got {curves[0].CountsPerDb}");
+
+        // QC connector reflection peak (1310): sample 3179, raw 29219, ~1014 m
+        Check(curves[0].Samples[3179] == 29219, $"QC peak raw must be 29219, got {curves[0].Samples[3179]}");
+        CheckClose(curves[0].DistanceM(3179), 1014.451, 0.01, "QC peak distance (1310)");
+
+        // fiber-end reflection peak (1310): sample 26165, raw 23068, ~8349 m
+        Check(curves[0].Samples[26165] == 23068, $"end peak raw must be 23068, got {curves[0].Samples[26165]}");
+        CheckClose(curves[0].DistanceM(26165), 8348.614, 0.01, "end peak distance (1310)");
+
+        // decoded DUT slope must match the GOLD attenuation (0.322 / 0.183 dB/km)
+        CheckClose(DutSlopeDbKm(curves[0]), 0.322, 0.01, "raw-trace slope 1310 vs GOLD 0.322");
+        CheckClose(DutSlopeDbKm(curves[1]), 0.183, 0.01, "raw-trace slope 1550 vs GOLD 0.183");
+    }
+
+    // Mean level of a sample window, then dB/km slope between two windows
+    private static double WindowLevel(RawTrace.TraceCurve c, int lo, int hi)
+    {
+        double s = 0;
+        for (int i = lo; i < hi; i++) s += c.LevelDb(i);
+        return s / (hi - lo);
+    }
+
+    private static double DutSlopeDbKm(RawTrace.TraceCurve c)
+    {
+        // windows well inside the DUT: after the QC connector, before the fiber end
+        double l1 = WindowLevel(c, 3300, 4000), l2 = WindowLevel(c, 25500, 26000);
+        double spanKm = (c.DistanceM(25500) + c.DistanceM(25999) - c.DistanceM(3300) - c.DistanceM(3999)) / 2000.0;
+        return (l1 - l2) / spanKm;
     }
 
     private static void TestGolden(string fileName,

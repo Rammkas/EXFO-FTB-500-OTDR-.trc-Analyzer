@@ -14,8 +14,9 @@
 //        2) a section explaining where the trace sample values live
 //           (RawSamples BinaryRef blobs);
 //        3) the node tree is NOT printed — instead it is saved to a JSON file
-//           "<name>.nodetree.json" next to the .trc file (all nodes with
-//           offset, type, size and parsed values).
+//           "<name>.nodetree.json" (all nodes with offset, type, size and
+//           parsed values); the folder follows --source_output: off = the
+//           application folder, on = the folder containing the .trc file.
 //
 // Chunk end determination (cross-checked, both methods reported):
 //   a) record header size field: an int32 located 4 bytes before the zlib
@@ -103,7 +104,9 @@ public static class FileMap
     // --------------------------------------------------------------------------
     // short mode: compact map + node tree saved to JSON
     // --------------------------------------------------------------------------
-    public static string RenderShort(string filepath)
+    // jsonDir: where <name>.nodetree.json is written (chosen by the caller
+    // according to --source_output, same rule as the CSV reports)
+    public static string RenderShort(string filepath, string jsonDir)
     {
         var (raw, chunks, merged) = LoadFileAndChunks(filepath);
         TreeInfo info = WalkTree(merged, chunks);
@@ -115,7 +118,7 @@ public static class FileMap
 
         if (info.RootOffset >= 0)
         {
-            string jsonPath = SaveTreeJson(filepath, raw.Length, merged.Length, chunks, info);
+            string jsonPath = SaveTreeJson(filepath, jsonDir, raw.Length, merged.Length, chunks, info);
             sb.AppendLine($"node tree saved to JSON: {jsonPath}");
         }
         else
@@ -583,7 +586,7 @@ public static class FileMap
     // --------------------------------------------------------------------------
     // Node tree -> JSON file
     // --------------------------------------------------------------------------
-    private static string SaveTreeJson(string filepath, long fileSize, long unpackedSize, List<Chunk> chunks, TreeInfo info)
+    private static string SaveTreeJson(string filepath, string jsonDir, long fileSize, long unpackedSize, List<Chunk> chunks, TreeInfo info)
     {
         byte[] merged = new byte[unpackedSize];
         foreach (var c in chunks)
@@ -602,7 +605,7 @@ public static class FileMap
         sb.AppendLine("}");
 
         string jsonPath = Path.Combine(
-            Path.GetDirectoryName(Path.GetFullPath(filepath)) ?? ".",
+            jsonDir,
             Path.GetFileNameWithoutExtension(filepath) + ".nodetree.json");
         File.WriteAllText(jsonPath, sb.ToString(), new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
         return jsonPath;

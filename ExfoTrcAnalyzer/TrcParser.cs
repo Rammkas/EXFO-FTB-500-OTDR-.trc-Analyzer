@@ -87,7 +87,8 @@ public static class TrcParser
     {
         Container   = 0, // container: value = table of child offsets (int32 x N, N = valLen/4)
         Int32       = 1, // int32 (Count, Type, Status, CursorA, EventChanged...)
-        BinaryRef   = 2, // binary reference: CLSID (GUID, 16 bytes), RawSamples — unused, returns null
+        BinaryRef   = 2, // binary reference: CLSID (GUID, 16 bytes), RawSamples (raw trace curve —
+                         // exported by the RawTrace module, not used for analysis), returns null in the tree
         Double      = 3, // double (Position, Length, Loss, Reflectance...); NaN is treated as "no value"
         Utf16String = 4, // UTF-16LE string (Comment, Date, Identifier...); trailing '\0' is trimmed
         Bool8       = 5, // 1-byte bool — never seen on checked files, kept from the Python parser
@@ -126,6 +127,34 @@ public static class TrcParser
         }
 
         return merged.ToArray();
+    }
+
+    // --------------------------------------------------------------------------
+    // Public reader of the 16-byte node header (name/type/value length) without
+    // decoding the value — used by the display modules (FileMap, RawTrace).
+    // Applies the same validity rules as ReadNodeAt (bounded name length,
+    // null-terminated ASCII name, offset inside the buffer).
+    // --------------------------------------------------------------------------
+    public sealed record NodeHeaderInfo(int Offset, string Name, int Type, int ValLen);
+
+    public static NodeHeaderInfo? ReadNodeHeader(byte[] buf, int offset)
+    {
+        if (offset <= 0 || offset + NodeHeaderSize > buf.Length)
+            return null;
+
+        int nameOffset = BitConverter.ToInt32(buf, offset);
+        int type = BitConverter.ToInt32(buf, offset + 4);
+        int valLen = BitConverter.ToInt32(buf, offset + 8);
+
+        if (nameOffset < 0 || nameOffset >= buf.Length)
+            return null;
+
+        int window = Math.Min(MaxNameLength, buf.Length - nameOffset);
+        int nullPos = Array.FindIndex(buf, nameOffset, window, b => b == 0);
+        if (nullPos == -1)
+            return null;
+
+        return new NodeHeaderInfo(offset, DecodeAscii(buf, nameOffset, nullPos - nameOffset), type, valLen);
     }
 
     // --------------------------------------------------------------------------

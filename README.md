@@ -31,7 +31,10 @@ thresholds and writes PASS/FAIL verdicts with reasons.
   detail tables.
 - `--file-map full|short` mode: structural map of the raw `.trc` file (record
   headers, zlib chunk ranges, node tree; `short` also exports the tree to JSON).
-- 33 regression tests, including GOLD tests against real reference files.
+- `--raw-trace` mode: export of the point-by-point trace curves from the
+  `RawSamples` blobs to CSV (Int16 samples, 1024 counts per dB).
+- Running with no parameters prints the full flag reference.
+- 34 regression tests, including GOLD tests against real reference files.
 
 ## Build & run
 
@@ -55,6 +58,7 @@ dotnet run --project ExfoTrcAnalyzer -- --source_output on path/to/file.trc
 | `--dump-keys <file.trc>` | — | Format diagnostics mode (see below) |
 | `--map <file.trc \| folder>` | — | ASCII link map mode (see below) |
 | `--file-map <full\|short> <file.trc \| folder>` | — | Structural map of the raw `.trc` file itself (see below) |
+| `--raw-trace <file.trc \| folder>` | — | Export the point-by-point trace curves to `raw_trace_<name>.csv` (see below) |
 | `--help`, `-h`, `/?` | — | Print the full flag reference (with descriptions and examples) |
 
 Running the program **with no parameters** (or with `--help`) prints the full
@@ -139,7 +143,25 @@ point-by-point trace values live (`RawSamples` BinaryRef blobs, ~125 KB per
 wavelength — the analyzer itself reads the computed EventTable Double nodes
 instead). The node tree is not printed; instead the complete tree (every node
 with offset, type, size and parsed value) is saved to **`<name>.nodetree.json`**
-next to the `.trc` file.
+(the folder follows `--source_output`, like the CSV reports).
+
+### Raw trace export
+
+```bash
+dotnet run --project ExfoTrcAnalyzer -- --raw-trace file.trc   # or a folder of files
+```
+
+Exports the point-by-point reflectogram curve (the `RawSamples` blobs) to
+**`raw_trace_<name>.csv`** — one row per sample: `trace_name;wavelength_nm;
+sample_index;time_s;distance_m;raw_int16;level_db`. The encoding was decoded
+from the reference files: Int16 little-endian samples, **1024 counts per dB**
+(the `ScaleFactor` field), uniform *time* axis — sample `i` corresponds to
+`RangeStart + i × SamplingPeriod` seconds, converted to meters via the trace's
+`Range`. Cross-checked: the QC-connector reflection peak lands at ~1014 m
+(EventTable: 1010.9 m), the fiber-end peak at ~8348 m (EventTable: 8349.3 m),
+and the decoded slopes match the GOLD attenuations (0.32 dB/km @1310,
+0.18 dB/km @1550). The CSV folder follows `--source_output`, like the other
+reports.
 
 ## Configuration (`otdr_config.txt`)
 
@@ -209,6 +231,11 @@ RID (`linux-x64`, `win-arm64`, ...) for other platforms.
   Utf16String, Bool8.
 - The root node is found by locating the name `OtdrFile` and verifying each
   candidate header.
+- The trace curve itself lives in a `RawSamples` BinaryRef blob inside each
+  `TraceN` container (in the decompressed stream, right after the node header):
+  Int16 little-endian samples, 1024 counts per dB (`ScaleFactor`), uniform time
+  axis `RangeStart + i × SamplingPeriod` — decoded and exportable via
+  `--raw-trace`.
 - EXFO does **not** store a measured dB/km coefficient in the EventTable;
   section attenuation is computed as `Loss / Length` (EXFO attributes connector
   losses to point events, so this is a correct estimate). If an explicit
@@ -226,7 +253,10 @@ ExfoTrcAnalyzer/          main tool
   TrcParser.cs            binary .trc format reader
   Analyzer.cs             sections/events extraction + PASS/FAIL verdicts
   Csv.cs                  CSV formatting (Excel-friendly)
-ExfoTrcAnalyzer.Tests/    regression tests (33, incl. GOLD)
+  MapRenderer.cs          --map: ASCII link schematic
+  FileMap.cs              --file-map: raw-file structural map + tree JSON export
+  RawTrace.cs             --raw-trace: point-by-point trace curve CSV export
+ExfoTrcAnalyzer.Tests/    regression tests (34, incl. GOLD)
 ```
 
 ## Disclaimer

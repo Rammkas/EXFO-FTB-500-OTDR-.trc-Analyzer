@@ -17,6 +17,10 @@
 //   exfo_trc_analyzer.exe --file-map <full|short> <file.trc | folder> — structural
 //       map of the raw file itself: full = detailed console map;
 //       short = compact map, node tree saved to <name>.nodetree.json
+//       (JSON folder follows --source_output)
+//   exfo_trc_analyzer.exe --raw-trace <file.trc | folder> — export point-by-point
+//       trace curves from the RawSamples blobs to raw_trace_<name>.csv
+//       (Int16 samples, 1024 counts per dB, uniform time axis -> meters)
 //
 // WORKFLOW:
 //   1) Config.Load — settings from otdr_config.txt (or defaults + template creation);
@@ -98,6 +102,17 @@ internal static class Program
             return;
         }
 
+        if (positional.Count >= 1 && positional[0] == "--raw-trace")
+        {
+            if (positional.Count < 2)
+            {
+                Console.WriteLine("Usage: exfo_trc_analyzer.exe --raw-trace <file.trc | folder>");
+                return;
+            }
+            DumpRawTrace(positional[1], sourceOutput);
+            return;
+        }
+
         if (positional.Count >= 1 && positional[0] == "--dump-keys")
         {
             if (positional.Count < 2)
@@ -130,7 +145,7 @@ internal static class Program
                 return;
             }
             bool shortMode = positional[1].Equals("short", StringComparison.OrdinalIgnoreCase);
-            DumpFileMap(positional[2], shortMode);
+            DumpFileMap(positional[2], shortMode, sourceOutput);
             return;
         }
 
@@ -207,7 +222,13 @@ internal static class Program
         Console.WriteLine("                                section showing where the point-by-point trace");
         Console.WriteLine("                                values live (RawSamples blobs). The node tree is");
         Console.WriteLine("                                not printed: it is saved to <name>.nodetree.json");
-        Console.WriteLine("                                next to the .trc file.");
+        Console.WriteLine("                                (folder follows --source_output).");
+        Console.WriteLine("  --raw-trace <file.trc | folder>");
+        Console.WriteLine("                                Export the point-by-point trace curves to CSV");
+        Console.WriteLine("                                (raw_trace_<name>.csv): sample index, time,");
+        Console.WriteLine("                                distance, raw Int16 value, level in dB");
+        Console.WriteLine("                                (1024 counts per dB). CSV folder follows");
+        Console.WriteLine("                                --source_output, like the other reports.");
         Console.WriteLine("  --dump-keys <file.trc>        Format diagnostics: dump the parsed node keys");
         Console.WriteLine("                                and values (for investigating new file versions).");
         Console.WriteLine("  --help, -h, /?                Show this reference.");
@@ -218,6 +239,7 @@ internal static class Program
         Console.WriteLine("  exfo_trc_analyzer.exe --source_output on C:\\measurements\\9076.trc");
         Console.WriteLine("  exfo_trc_analyzer.exe --map C:\\measurements\\9076.trc");
         Console.WriteLine("  exfo_trc_analyzer.exe --file-map short C:\\measurements\\9076.trc");
+        Console.WriteLine("  exfo_trc_analyzer.exe --raw-trace C:\\measurements\\9076.trc");
     }
 
     private static void DumpKeys(string filepath)
@@ -261,10 +283,10 @@ internal static class Program
     }
 
     // --------------------------------------------------------------------------
-    // --file-map <full|short>: structural map of the raw .trc file.
-    // full: complete console map. short: compact map + node tree saved as JSON.
+    // --raw-trace: export the point-by-point trace curves (RawSamples blobs)
+    // to CSV. Output folder follows --source_output like the other reports.
     // --------------------------------------------------------------------------
-    private static void DumpFileMap(string path, bool shortMode)
+    private static void DumpRawTrace(string path, bool sourceOutput)
     {
         try
         {
@@ -280,7 +302,70 @@ internal static class Program
             }
 
             foreach (string file in files)
-                Console.WriteLine(shortMode ? FileMap.RenderShort(file) : FileMap.Render(file));
+            {
+                try
+                {
+                    var curves = RawTrace.ReadCurves(file);
+                    if (curves.Count == 0)
+                    {
+                        Console.WriteLine($"[WARN] {Path.GetFileName(file)}: no RawSamples trace blobs found");
+                        continue;
+                    }
+
+                    string outDir = sourceOutput
+                        ? Path.GetDirectoryName(Path.GetFullPath(file))!
+                        : AppContext.BaseDirectory;
+                    string csvPath = Path.Combine(outDir, "raw_trace_" + Path.GetFileNameWithoutExtension(file) + ".csv");
+                    RawTrace.SaveCsv(csvPath, curves);
+
+                    var parts = curves.Select(c =>
+                        $"{(c.WavelengthNm > 0 ? c.WavelengthNm + " nm" : c.TraceName)}: {c.SampleCount} samples");
+                    Console.WriteLine($"[OK] {Path.GetFileName(file)} -> {csvPath} ({string.Join(", ", parts)})");
+                }
+                catch (Exception e)
+                {
+                    Console.WriteLine($"[ERROR] {file}: {e.Message}");
+                }
+            }
+        }
+        catch (Exception e)
+        {
+            Console.WriteLine($"[ERROR] {path}: {e.Message}");
+        }
+    }
+
+    // --------------------------------------------------------------------------
+    // --file-map <full|short>: structural map of the raw .trc file.
+    // full: complete console map. short: compact map + node tree saved as JSON;
+    // the JSON folder follows --source_output, like the CSV reports.
+    // --------------------------------------------------------------------------
+    private static void DumpFileMap(string path, bool shortMode, bool sourceOutput)
+    {
+        try
+        {
+            var files = new List<string>();
+            if (Directory.Exists(path))
+                files.AddRange(Directory.GetFiles(path, "*.trc").OrderBy(f => f, StringComparer.Ordinal));
+            else if (File.Exists(path))
+                files.Add(path);
+            else
+            {
+                Console.WriteLine($"[ERROR] Path not found: {path}");
+                return;
+            }
+
+            foreach (string file in files)
+            {
+                if (!shortMode)
+                {
+                    Console.WriteLine(FileMap.Render(file));
+                    continue;
+                }
+                string jsonDir = sourceOutput
+                    ? Path.GetDirectoryName(Path.GetFullPath(file))!
+                    : AppContext.BaseDirectory;
+                Console.WriteLine(FileMap.RenderShort(file, jsonDir));
+            }
         }
         catch (Exception e)
         {
