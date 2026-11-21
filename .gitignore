@@ -11,6 +11,7 @@ publish/
 # Test / analysis artifacts
 *.csv
 otdr_config.txt
+*.nodetree.json
 
 # Measurement data — do not publish reflectograms by accident
 *.trc

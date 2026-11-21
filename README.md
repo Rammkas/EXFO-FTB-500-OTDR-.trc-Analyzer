@@ -29,6 +29,8 @@ thresholds and writes PASS/FAIL verdicts with reasons.
 - `--dump-keys` diagnostic mode to inspect the raw EXFO field names of any file.
 - `--map` mode: ASCII schematic of the measured link with event markers and
   detail tables.
+- `--file-map full|short` mode: structural map of the raw `.trc` file (record
+  headers, zlib chunk ranges, node tree; `short` also exports the tree to JSON).
 - 33 regression tests, including GOLD tests against real reference files.
 
 ## Build & run
@@ -48,10 +50,15 @@ dotnet run --project ExfoTrcAnalyzer -- --source_output on path/to/file.trc
 
 | Flag | Default | Meaning |
 |---|---|---|
-| *(positional)* | current folder | Folder with `.trc` files, or a single `.trc` file path |
+| *(positional)* | — | Folder with `.trc` files, or a single `.trc` file path. With no path at all the program prints the flag reference and exits |
 | `--source_output on\|off` | `off` | Where the CSV reports are written: `off` = the application folder, `on` = the folder containing the `.trc` files |
 | `--dump-keys <file.trc>` | — | Format diagnostics mode (see below) |
 | `--map <file.trc \| folder>` | — | ASCII link map mode (see below) |
+| `--file-map <full\|short> <file.trc \| folder>` | — | Structural map of the raw `.trc` file itself (see below) |
+| `--help`, `-h`, `/?` | — | Print the full flag reference (with descriptions and examples) |
+
+Running the program **with no parameters** (or with `--help`) prints the full
+flag reference: every flag, what it does, and usage examples.
 
 Flags go before the input path (the parser also tolerates them after it, but
 the documented convention is flags first).
@@ -101,6 +108,38 @@ legend: ▐ port  ● QC connector  × splice  ◆ end of fiber | ▒ buffer spo
 
 followed by tables of all sections and events (loss / reflection / attenuation
 for both wavelengths) and the fiber-under-test totals with FAIL/WARNING reasons.
+
+### File map
+
+```bash
+dotnet run --project ExfoTrcAnalyzer -- --file-map full file.trc   # or a folder of files
+dotnet run --project ExfoTrcAnalyzer -- --file-map short file.trc
+```
+
+Maps the raw `.trc` file itself, in two variants:
+
+**`full`** — detailed console map, three layers:
+
+1. **Raw file layout** — the observed EXFO container structure: record headers
+   with the ASCII magic `AppReg Format Ex  ` (their int32 fields are printed),
+   zlib chunks with exact byte ranges (sizes cross-verified by the Adler-32
+   checksum), and 4-byte int32 size prefixes between chunks; service gaps are
+   shown with a hex preview and extracted text.
+2. **Unpacked stream** — which chunk produced which byte range of the stream
+   the analyzer parses (identical to `TrcParser.DecompressTrc` behavior) and
+   where the root node `OtdrFile` lives.
+3. **Node tree** — every container expanded with child count, offset and source
+   chunk; scalar children grouped by type per parent; BinaryRef blob nodes
+   (`CLSID`, `RawSamples`) with offsets and sizes; node type totals at the end
+   (e.g. `Container 39, Int32 120, BinaryRef 40, Double 362, Utf16String 79`).
+
+**`short`** — compact "address → stores what" map: every raw region annotated
+with the node-tree content it carries, plus a section explaining where the
+point-by-point trace values live (`RawSamples` BinaryRef blobs, ~125 KB per
+wavelength — the analyzer itself reads the computed EventTable Double nodes
+instead). The node tree is not printed; instead the complete tree (every node
+with offset, type, size and parsed value) is saved to **`<name>.nodetree.json`**
+next to the `.trc` file.
 
 ## Configuration (`otdr_config.txt`)
 

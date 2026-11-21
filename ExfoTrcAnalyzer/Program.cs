@@ -2,7 +2,9 @@
 // Program.cs — entry point and CLI of the exfo_trc_analyzer utility.
 //
 // USAGE (flags go before the input path):
-//   exfo_trc_analyzer.exe [folder_with_.trc]         — parse and write CSV reports
+//   exfo_trc_analyzer.exe                            — with NO parameters (or --help/-h/?)
+//       prints the full flag reference (PrintUsage)
+//   exfo_trc_analyzer.exe <folder_with_.trc>         — parse and write CSV reports
 //   exfo_trc_analyzer.exe <file.trc>                 — parse a single file
 //   exfo_trc_analyzer.exe --source_output on|off <path> — where CSV reports are written:
 //       off (default): the application folder;
@@ -12,6 +14,9 @@
 //       names when encountering a new .trc variant)
 //   exfo_trc_analyzer.exe --map <file.trc | folder>  — ASCII link map: a scaled
 //       schematic of the measured path with event markers and detail tables
+//   exfo_trc_analyzer.exe --file-map <full|short> <file.trc | folder> — structural
+//       map of the raw file itself: full = detailed console map;
+//       short = compact map, node tree saved to <name>.nodetree.json
 //
 // WORKFLOW:
 //   1) Config.Load — settings from otdr_config.txt (or defaults + template creation);
@@ -48,6 +53,7 @@ namespace ExfoTrcAnalyzer;
 // Usage:
 //   exfo_trc_analyzer.exe [folder_with_.trc | file.trc]
 //   exfo_trc_analyzer.exe --dump-keys <file.trc>   — format diagnostics
+// Running with NO parameters prints the full flag reference (PrintUsage).
 // ==============================================================================
 internal static class Program
 {
@@ -84,6 +90,14 @@ internal static class Program
         for (int i = 0; i < positional.Count; i++)
             positional[i] = positional[i].TrimEnd('"');
 
+        // --help / -h / /? — explicit flag reference; no parameters shows the same
+        if (positional.Count >= 1 &&
+            (positional[0] == "--help" || positional[0] == "-h" || positional[0] == "/?"))
+        {
+            PrintUsage();
+            return;
+        }
+
         if (positional.Count >= 1 && positional[0] == "--dump-keys")
         {
             if (positional.Count < 2)
@@ -106,7 +120,28 @@ internal static class Program
             return;
         }
 
-        string inputArg = positional.Count > 0 ? positional[0] : ".";
+        if (positional.Count >= 1 && positional[0] == "--file-map")
+        {
+            if (positional.Count < 3 ||
+                (!positional[1].Equals("full", StringComparison.OrdinalIgnoreCase) &&
+                 !positional[1].Equals("short", StringComparison.OrdinalIgnoreCase)))
+            {
+                Console.WriteLine("Usage: exfo_trc_analyzer.exe --file-map <full|short> <file.trc | folder>");
+                return;
+            }
+            bool shortMode = positional[1].Equals("short", StringComparison.OrdinalIgnoreCase);
+            DumpFileMap(positional[2], shortMode);
+            return;
+        }
+
+        // No input path given: show the flag reference instead of silently
+        // analyzing the current folder.
+        if (positional.Count == 0)
+        {
+            PrintUsage();
+            return;
+        }
+        string inputArg = positional[0];
 
         // Accept either a folder or a direct path to a single .trc file.
         string inputDir;
@@ -136,6 +171,53 @@ internal static class Program
         //                  on = write CSVs to the folder containing the .trc files.
         string outputDir = sourceOutput ? inputDir : AppContext.BaseDirectory;
         ProcessFolder(inputDir, singleFile, outputDir);
+    }
+
+    // --------------------------------------------------------------------------
+    // Full flag reference — printed when the program starts with no parameters
+    // or with --help. Keep this text in sync with the parsing logic in Main
+    // and with README.md.
+    // --------------------------------------------------------------------------
+    private static void PrintUsage()
+    {
+        // Version comes from the csproj <Version> — nothing hardcoded here
+        Version? v = typeof(Program).Assembly.GetName().Version;
+        Console.WriteLine($"EXFO FTB-500 .trc analyzer v{(v?.ToString(3) ?? "0.0.0")}");
+        Console.WriteLine();
+        Console.WriteLine("Usage — write flags BEFORE the input path:");
+        Console.WriteLine("  exfo_trc_analyzer.exe [flags] <file.trc | folder>");
+        Console.WriteLine();
+        Console.WriteLine("Flags:");
+        Console.WriteLine("  (no flag)                     Analyze .trc files and write result CSVs:");
+        Console.WriteLine("                                events, link summary and pass/fail verdict");
+        Console.WriteLine("                                for each reflectogram (1310 and 1550 nm).");
+        Console.WriteLine("  --source_output on|off        Where result CSVs are written:");
+        Console.WriteLine("                                off (default) = folder of the application (.exe);");
+        Console.WriteLine("                                on            = folder containing the .trc files.");
+        Console.WriteLine("  --map <file.trc | folder>     ASCII link map: buffer spool -> QC connector ->");
+        Console.WriteLine("                                fiber under test, with event distances, losses");
+        Console.WriteLine("                                and reflectances for both wavelengths.");
+        Console.WriteLine("  --file-map full <file.trc | folder>");
+        Console.WriteLine("                                Detailed structural map of the raw .trc file:");
+        Console.WriteLine("                                record headers, zlib chunk byte ranges, unpacked");
+        Console.WriteLine("                                stream and the full node tree (incl. BinaryRef");
+        Console.WriteLine("                                blob locations).");
+        Console.WriteLine("  --file-map short <file.trc | folder>");
+        Console.WriteLine("                                Compact \"address -> stores what\" map plus a");
+        Console.WriteLine("                                section showing where the point-by-point trace");
+        Console.WriteLine("                                values live (RawSamples blobs). The node tree is");
+        Console.WriteLine("                                not printed: it is saved to <name>.nodetree.json");
+        Console.WriteLine("                                next to the .trc file.");
+        Console.WriteLine("  --dump-keys <file.trc>        Format diagnostics: dump the parsed node keys");
+        Console.WriteLine("                                and values (for investigating new file versions).");
+        Console.WriteLine("  --help, -h, /?                Show this reference.");
+        Console.WriteLine();
+        Console.WriteLine("Examples:");
+        Console.WriteLine("  exfo_trc_analyzer.exe C:\\measurements");
+        Console.WriteLine("  exfo_trc_analyzer.exe C:\\measurements\\9076.trc");
+        Console.WriteLine("  exfo_trc_analyzer.exe --source_output on C:\\measurements\\9076.trc");
+        Console.WriteLine("  exfo_trc_analyzer.exe --map C:\\measurements\\9076.trc");
+        Console.WriteLine("  exfo_trc_analyzer.exe --file-map short C:\\measurements\\9076.trc");
     }
 
     private static void DumpKeys(string filepath)
@@ -171,6 +253,34 @@ internal static class Program
             foreach (string file in files)
                 foreach (var f in Analyzer.AnalyzeFile(file))
                     Console.WriteLine(MapRenderer.Render(f));
+        }
+        catch (Exception e)
+        {
+            Console.WriteLine($"[ERROR] {path}: {e.Message}");
+        }
+    }
+
+    // --------------------------------------------------------------------------
+    // --file-map <full|short>: structural map of the raw .trc file.
+    // full: complete console map. short: compact map + node tree saved as JSON.
+    // --------------------------------------------------------------------------
+    private static void DumpFileMap(string path, bool shortMode)
+    {
+        try
+        {
+            var files = new List<string>();
+            if (Directory.Exists(path))
+                files.AddRange(Directory.GetFiles(path, "*.trc").OrderBy(f => f, StringComparer.Ordinal));
+            else if (File.Exists(path))
+                files.Add(path);
+            else
+            {
+                Console.WriteLine($"[ERROR] Path not found: {path}");
+                return;
+            }
+
+            foreach (string file in files)
+                Console.WriteLine(shortMode ? FileMap.RenderShort(file) : FileMap.Render(file));
         }
         catch (Exception e)
         {
