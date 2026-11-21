@@ -94,6 +94,26 @@ GOLD tests, put the `.trc` files in a `reference_trc` folder next to the test
 binary or the current directory, or set the `OTDR_TRC_DIR` environment variable.
 Without them the GOLD tests are skipped (SKIP), not failed.
 
+## Building a standalone executable
+
+Single-file publish, two variants:
+
+```bash
+# Self-contained: runs on any Windows x64 machine, no .NET installation needed
+# (~65 MB)
+dotnet publish ExfoTrcAnalyzer -c Release -r win-x64 --self-contained true \
+    -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true \
+    -o publish/self-contained-win-x64
+
+# Framework-dependent: tiny (~0.2 MB), requires the .NET 8 Desktop Runtime
+# installed on the target machine
+dotnet publish ExfoTrcAnalyzer -c Release -r win-x64 --self-contained false \
+    -p:PublishSingleFile=true -o publish/framework-dependent-win-x64
+```
+
+The result is a single `exfo_trc_analyzer.exe`. Replace `win-x64` with another
+RID (`linux-x64`, `win-arm64`, ...) for other platforms.
+
 ## Format notes (reverse-engineered)
 
 - A `.trc` file is binary service data plus a sequence of zlib-compressed
