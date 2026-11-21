@@ -9,6 +9,10 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <InvariantGlobalization>true</InvariantGlobalization>
     <Version>1.6.0</Version>
+    <!-- Release packaging: no .pdb debug symbols are produced. They are not
+         needed to run the tool and keep the release zips exe-only. -->
+    <DebugType>none</DebugType>
+    <DebugSymbols>false</DebugSymbols>
   </PropertyGroup>
 
 </Project>
