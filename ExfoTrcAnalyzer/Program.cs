@@ -4,6 +4,9 @@
 // USAGE:
 //   exfo_trc_analyzer.exe [folder_with_.trc]         — parse and write CSV reports
 //   exfo_trc_analyzer.exe <file.trc>                 — parse a single file
+//   exfo_trc_analyzer.exe ... --source_output on|off — where CSV reports are written:
+//       off (default): the application folder;
+//       on:            the folder containing the .trc files.
 //   exfo_trc_analyzer.exe --dump-keys <file.trc>     — format diagnostics: prints
 //       all EventTable and trace keys with values (needed to confirm EXFO field
 //       names when encountering a new .trc variant)
@@ -18,7 +21,8 @@
 //   2) iterate over *.trc in the folder (ordered by file name, Ordinal); for each —
 //      Analyzer.AnalyzeFile (TrcParser -> tree -> sections/events -> verdict);
 //   3) every file is processed in try/catch: a corrupt file does not stop the batch;
-//   4) three CSVs are written to the CURRENT working folder (each write in
+//   4) three CSVs are written to the folder chosen by --source_output
+//      (off = application folder, on = folder with the .trc files; each write in
 //      try/catch — a CSV locked open in Excel must not crash the finished results):
 //      summary_fibers.csv  — one row per fiber: length/loss/attenuation at 1310 and
 //                            1550, QC connector loss, verdict and reasons,
@@ -49,18 +53,41 @@ internal static class Program
     {
         Console.OutputEncoding = Encoding.UTF8;
 
-        if (args.Length >= 1 && args[0] == "--dump-keys")
+        // --- option parsing: --source_output on|off (default off) ---
+        bool sourceOutput = false;
+        var positional = new List<string>();
+        for (int i = 0; i < args.Length; i++)
         {
-            if (args.Length < 2)
+            if (args[i].Equals("--source_output", StringComparison.OrdinalIgnoreCase))
+            {
+                if (i + 1 >= args.Length ||
+                    (!args[i + 1].Equals("on", StringComparison.OrdinalIgnoreCase) &&
+                     !args[i + 1].Equals("off", StringComparison.OrdinalIgnoreCase)))
+                {
+                    Console.WriteLine("[ERROR] --source_output requires a value: on or off");
+                    return;
+                }
+                sourceOutput = args[i + 1].Equals("on", StringComparison.OrdinalIgnoreCase);
+                i++; // consume the value
+            }
+            else
+            {
+                positional.Add(args[i]);
+            }
+        }
+
+        if (positional.Count >= 1 && positional[0] == "--dump-keys")
+        {
+            if (positional.Count < 2)
             {
                 Console.WriteLine("Usage: exfo_trc_analyzer.exe --dump-keys <file.trc>");
                 return;
             }
-            DumpKeys(args[1]);
+            DumpKeys(positional[1]);
             return;
         }
 
-        string inputArg = args.Length > 0 ? args[0] : ".";
+        string inputArg = positional.Count > 0 ? positional[0] : ".";
 
         // Accept either a folder or a direct path to a single .trc file.
         string inputDir;
@@ -86,7 +113,10 @@ internal static class Program
         }
 
         Config.Load(inputDir);
-        ProcessFolder(inputDir, singleFile);
+        // --source_output: off (default) = write CSVs to the application folder;
+        //                  on = write CSVs to the folder containing the .trc files.
+        string outputDir = sourceOutput ? inputDir : AppContext.BaseDirectory;
+        ProcessFolder(inputDir, singleFile, outputDir);
     }
 
     private static void DumpKeys(string filepath)
@@ -104,7 +134,7 @@ internal static class Program
     // --------------------------------------------------------------------------
     // Main folder processing (or a single explicitly given .trc file)
     // --------------------------------------------------------------------------
-    private static void ProcessFolder(string inputDir, string? singleFile = null)
+    private static void ProcessFolder(string inputDir, string? singleFile, string outputDir)
     {
         List<string> trcFiles;
         try
@@ -177,7 +207,7 @@ internal static class Program
             }
         }
 
-        TrySaveCsv("summary_fibers.csv", new[]
+        TrySaveCsv(outputDir, "summary_fibers.csv", new[]
         {
             "File", "Fiber (ID)",
             "Length 1310 (m)", "Loss 1310 (dB)", "Attenuation 1310 (dB/km)",
@@ -186,7 +216,7 @@ internal static class Program
             "Verdict", "Rejection reasons", "Warnings",
         }, summaryRows);
 
-        TrySaveCsv("sections_detail.csv", new[]
+        TrySaveCsv(outputDir, "sections_detail.csv", new[]
         {
             "File", "Fiber (ID)", "Section #", "Role", "Start (m)", "End (m)",
             "Length 1310 (m)", "Loss 1310 (dB)", "Attenuation 1310 (dB/km)",
@@ -194,22 +224,22 @@ internal static class Program
             "Verdict", "Reason",
         }, sectionRows);
 
-        TrySaveCsv("events_detail.csv", new[]
+        TrySaveCsv(outputDir, "events_detail.csv", new[]
         {
             "File", "Fiber (ID)", "Event #", "Bench role", "Position (m)",
             "Loss 1310 (dB)", "Reflection 1310 (dB)", "Loss 1550 (dB)",
             "Reflection 1550 (dB)", "Verdict", "Reason",
         }, eventRows);
 
-        Console.WriteLine("\nDone! Created tables: summary_fibers.csv, sections_detail.csv, events_detail.csv");
+        Console.WriteLine($"\nDone! Created tables in '{outputDir}': summary_fibers.csv, sections_detail.csv, events_detail.csv");
     }
 
     // CSV writing must not crash the program (e.g. when the file is open in Excel)
-    private static void TrySaveCsv(string filename, string[] headers, List<string[]> rows)
+    private static void TrySaveCsv(string outputDir, string filename, string[] headers, List<string[]> rows)
     {
         try
         {
-            Csv.SaveCsv(filename, headers, rows);
+            Csv.SaveCsv(Path.Combine(outputDir, filename), headers, rows);
         }
         catch (Exception e)
         {
