@@ -19,7 +19,8 @@ thresholds and writes PASS/FAIL verdicts with reasons.
 
 - **No dependencies** — pure .NET 8, no NuGet packages.
 - Reverse-engineered `.trc` reader: zlib chunk scanning + node-tree parsing
-  (format details are documented in `ExfoTrcAnalyzer/TrcParser.cs`).
+  (format details are documented in [FORMAT.md](FORMAT.md) and
+  `ExfoTrcAnalyzer/TrcParser.cs`).
 - 1310/1550 sections and events matched **by coordinate**, not by index, so an
   extra/missing event on one wavelength does not shift the pairs.
 - Configurable thresholds via `otdr_config.txt` (auto-created as a commented
@@ -286,8 +287,8 @@ RID (`linux-x64`, `win-arm64`, ...) for other platforms.
   losses to point events, so this is a correct estimate). If an explicit
   attenuation field appears in some firmware, it takes priority automatically.
 
-Full details are documented in the file headers of `TrcParser.cs` and
-`Analyzer.cs`.
+Full details are documented in [FORMAT.md](FORMAT.md) and in the file
+headers of `TrcParser.cs` and `Analyzer.cs`.
 
 ## Project layout
 
@@ -303,6 +304,7 @@ ExfoTrcAnalyzer/          main tool
   RawTrace.cs             --raw-trace: point-by-point trace curve CSV export
   PlotExport.cs           --excel-trace: binned chart-friendly CSV export
 ExfoTrcAnalyzer.Tests/    regression tests (37, incl. GOLD)
+FORMAT.md                 full reverse-engineered format documentation
 ```
 
 ## Disclaimer
