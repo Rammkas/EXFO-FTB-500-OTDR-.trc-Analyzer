@@ -22,6 +22,8 @@
 //   exfo_trc_analyzer.exe --raw-trace <file.trc | folder> — export point-by-point
 //       trace curves from the RawSamples blobs to raw_trace_<name>.csv
 //       (Int16 samples, 1024 counts per dB, uniform time axis -> meters)
+//   exfo_trc_analyzer.exe --excel-trace <file.trc | folder> — chart-friendly
+//       export: trace_plot_<name>.csv (1 m bins, level column per wavelength)
 //
 // WORKFLOW:
 //   1) Config.Load — settings from otdr_config.txt (or defaults + template creation);
@@ -54,7 +56,8 @@ using System.Text;
 namespace ExfoTrcAnalyzer;
 
 // ==============================================================================
-// Thin CLI over the Config / TrcParser / Analyzer / Csv modules.
+// Thin CLI over the Config / TrcParser / Analyzer / Csv / RawTrace / PlotExport modules.
+// (PlotExport writes CSV only — no external libraries anywhere in the tool.)
 // Usage:
 //   exfo_trc_analyzer.exe [folder_with_.trc | file.trc]
 //   exfo_trc_analyzer.exe --dump-keys <file.trc>   — format diagnostics
@@ -111,6 +114,17 @@ internal static class Program
                 return;
             }
             DumpRawTrace(positional[1], sourceOutput);
+            return;
+        }
+
+        if (positional.Count >= 1 && positional[0] == "--excel-trace")
+        {
+            if (positional.Count < 2)
+            {
+                Console.WriteLine("Usage: exfo_trc_analyzer.exe --excel-trace <file.trc | folder>");
+                return;
+            }
+            DumpExcelTrace(positional[1], sourceOutput);
             return;
         }
 
@@ -226,6 +240,11 @@ internal static class Program
         Console.WriteLine("                                values live (RawSamples blobs). The node tree is");
         Console.WriteLine("                                not printed: it is saved to <name>.nodetree.json");
         Console.WriteLine("                                (folder follows --source_output).");
+        Console.WriteLine("  --excel-trace <file.trc | folder>");
+        Console.WriteLine("                                Chart-friendly trace export trace_plot_<name>.csv");
+        Console.WriteLine("                                (1 m bins, level column per wavelength) — insert");
+        Console.WriteLine("                                a chart in Excel or any other tool straight from");
+        Console.WriteLine("                                the columns. Folder follows --source_output.");
         Console.WriteLine("  --raw-trace <file.trc | folder>");
         Console.WriteLine("                                Export the point-by-point trace curves to CSV");
         Console.WriteLine("                                (raw_trace_<name>.csv): sample index, time,");
@@ -242,6 +261,7 @@ internal static class Program
         Console.WriteLine("  exfo_trc_analyzer.exe --source_output on C:\\measurements\\9076.trc");
         Console.WriteLine("  exfo_trc_analyzer.exe --map C:\\measurements\\9076.trc");
         Console.WriteLine("  exfo_trc_analyzer.exe --file-map short C:\\measurements\\9076.trc");
+        Console.WriteLine("  exfo_trc_analyzer.exe --excel-trace C:\\measurements\\9076.trc");
         Console.WriteLine("  exfo_trc_analyzer.exe --raw-trace C:\\measurements\\9076.trc");
     }
 
@@ -294,6 +314,67 @@ internal static class Program
 
                 foreach (var f in Analyzer.AnalyzeFile(file))
                     Console.WriteLine(MapRenderer.Render(f, curves));
+            }
+        }
+        catch (Exception e)
+        {
+            Console.WriteLine($"[ERROR] {path}: {e.Message}");
+        }
+    }
+
+    // --------------------------------------------------------------------------
+    // --excel-trace: chart-friendly export — trace_plot_<name>.csv (1 m bins,
+    // level column per wavelength), ready for charts in Excel or any tool.
+    // Output folder follows --source_output like the other reports.
+    // --------------------------------------------------------------------------
+    private static void DumpExcelTrace(string path, bool sourceOutput)
+    {
+        try
+        {
+            var files = new List<string>();
+            if (Directory.Exists(path))
+                files.AddRange(Directory.GetFiles(path, "*.trc").OrderBy(f => f, StringComparer.Ordinal));
+            else if (File.Exists(path))
+                files.Add(path);
+            else
+            {
+                Console.WriteLine($"[ERROR] Path not found: {path}");
+                return;
+            }
+
+            foreach (string file in files)
+            {
+                try
+                {
+                    var curves = RawTrace.ReadCurves(file);
+                    if (curves.Count == 0)
+                    {
+                        Console.WriteLine($"[WARNING] {Path.GetFileName(file)}: RawSamples blobs not found");
+                        continue;
+                    }
+
+                    var data = PlotExport.BuildPlotData(curves);
+                    if (data.Series.Count == 0)
+                    {
+                        Console.WriteLine($"[WARNING] {Path.GetFileName(file)}: no distance-calibrated traces");
+                        continue;
+                    }
+
+                    string outDir = sourceOutput
+                        ? Path.GetDirectoryName(Path.GetFullPath(file))!
+                        : AppContext.BaseDirectory;
+                    string baseName = Path.GetFileNameWithoutExtension(file);
+
+                    string csvPath = Path.Combine(outDir, "trace_plot_" + baseName + ".csv");
+                    PlotExport.SaveCsv(csvPath, data);
+
+                    string series = string.Join(", ", data.Series.Select(s => s.SeriesName));
+                    Console.WriteLine($"[OK] {Path.GetFileName(file)} -> {csvPath} ({data.Distances.Count} rows, {data.Series.Count} series: {series})");
+                }
+                catch (Exception e)
+                {
+                    Console.WriteLine($"[ERROR] {file}: {e.Message}");
+                }
             }
         }
         catch (Exception e)

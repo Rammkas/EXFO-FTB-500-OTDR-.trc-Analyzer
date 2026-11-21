@@ -34,8 +34,11 @@ thresholds and writes PASS/FAIL verdicts with reasons.
   headers, zlib chunk ranges, node tree; `short` also exports the tree to JSON).
 - `--raw-trace` mode: export of the point-by-point trace curves from the
   `RawSamples` blobs to CSV (Int16 samples, 1024 counts per dB).
+- `--excel-trace` mode: chart-friendly binned CSV export (one row per meter,
+  level column per wavelength) — charts in Excel or any other tool are built
+  straight from the columns.
 - Running with no parameters prints the full flag reference.
-- 35 regression tests, including GOLD tests against real reference files.
+- 37 regression tests, including GOLD tests against real reference files.
 
 ## Build & run
 
@@ -60,6 +63,7 @@ dotnet run --project ExfoTrcAnalyzer -- --source_output on path/to/file.trc
 | `--map <file.trc \| folder>` | — | ASCII link map mode (see below) |
 | `--file-map <full\|short> <file.trc \| folder>` | — | Structural map of the raw `.trc` file itself (see below) |
 | `--raw-trace <file.trc \| folder>` | — | Export the point-by-point trace curves to `raw_trace_<name>.csv` (see below) |
+| `--excel-trace <file.trc \| folder>` | — | Chart-friendly export `trace_plot_<name>.csv` — binned, one level column per wavelength (see below) |
 | `--help`, `-h`, `/?` | — | Print the full flag reference (with descriptions and examples) |
 
 Running the program **with no parameters** (or with `--help`) prints the full
@@ -184,6 +188,26 @@ and the decoded slopes match the GOLD attenuations (0.32 dB/km at 1310 nm,
 0.18 dB/km at 1550 nm). The CSV folder follows `--source_output`, like the other
 reports.
 
+### Chart-friendly CSV export
+
+```bash
+dotnet run --project ExfoTrcAnalyzer -- --excel-trace file.trc   # or a folder of files
+```
+
+Writes **`trace_plot_<name>.csv`** per `.trc` — one row per 1 m bin:
+
+```
+distance_m;level_db_1310nm;level_db_1550nm
+0,000;25,485;26,283
+1,000;28,212;28,157
+```
+
+Binning is peak-preserving (max dB per bin), so reflection spikes survive
+downsampling; select the columns in Excel (or any plotting tool) and insert a
+chart in one step. Plain CSV keeps the data open and easy for third-party
+programs to consume. Output folder follows `--source_output`, like the other
+reports.
+
 ## Configuration (`otdr_config.txt`)
 
 The file is looked for in the folder with the `.trc` files, then next to the
@@ -274,10 +298,11 @@ ExfoTrcAnalyzer/          main tool
   TrcParser.cs            binary .trc format reader
   Analyzer.cs             sections/events extraction + PASS/FAIL verdicts
   Csv.cs                  CSV formatting (Excel-friendly)
-  MapRenderer.cs          --map: ASCII link schematic
+  MapRenderer.cs          --map: ASCII link schematic + raw trace plots
   FileMap.cs              --file-map: raw-file structural map + tree JSON export
   RawTrace.cs             --raw-trace: point-by-point trace curve CSV export
-ExfoTrcAnalyzer.Tests/    regression tests (35, incl. GOLD)
+  PlotExport.cs           --excel-trace: binned chart-friendly CSV export
+ExfoTrcAnalyzer.Tests/    regression tests (37, incl. GOLD)
 ```
 
 ## Disclaimer

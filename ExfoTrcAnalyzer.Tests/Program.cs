@@ -83,6 +83,9 @@ internal static class TestRunner
             ("Csv.CsvField escaping", TestCsvField),
             ("Csv.SaveCsv writes file with BOM", TestCsvSave),
 
+            // --- PlotExport ---
+            ("PlotExport binning is peak-preserving", TestPlotExportBinning),
+
             // --- GOLD: reference .trc files ---
             ("GOLD 9076.trc", () => TestGolden("9076.trc", 7338.4, 2.364, 0.322, 7336.5, 1.346, 0.183, 0.541, 0.440)),
             ("GOLD 9077.trc", () => TestGolden("9077.trc", 7342.2, 2.406, 0.328, 7336.5, 1.365, 0.186, 0.152, 0.147)),
@@ -90,6 +93,7 @@ internal static class TestRunner
             ("GOLD 9085.trc", () => TestGolden("9085.trc", 7338.7, 2.432, 0.331, 7336.5, 1.372, 0.187, 0.480, 0.352)),
             ("GOLD 9076.trc raw trace curves (--raw-trace)", TestRawTraceGolden),
             ("GOLD 9076.trc map trace plots (--map)", TestMapTracePlotsGolden),
+            ("GOLD 9076.trc Excel trace export (--excel-trace)", TestExcelTraceGolden),
         };
 
         int failed = 0;
@@ -660,8 +664,105 @@ internal static class TestRunner
     // GOLD for the --raw-trace export: RawSamples blob encoding verified on
     // 9076.trc — Int16 LE samples, 1024 counts per dB, uniform time axis
     // (see RawTrace.cs file header for the cross-checks)
+    // BuildPlotData: each 1 m bin must hold the MAXIMUM dB of its samples
+    // (narrow spikes survive downsampling), bins beyond the curve stay empty
+    private static void TestPlotExportBinning()
+    {
+        // synthetic curve: samples every 0.25 m from 0 to 9.75 m, one spike
+        var curve = new RawTrace.TraceCurve
+        {
+            TraceName = "Trace0",
+            WavelengthNm = 1310,
+            SamplingPeriodS = 1.0,   // fake calibration: 1 sample per unit time
+            RangeStartS = 0,
+            RangeEndS = 40,
+            RangeM = 10,             // DistanceM(i) = i * 10 / 40 = i * 0.25
+            CountsPerDb = 1000,
+        };
+        var samples = new short[40];
+        for (int i = 0; i < 40; i++) samples[i] = 10_000; // 10 dB baseline
+        samples[2 * 4 + 3] = 18_000; // 18 dB spike at 2.75 m -> bin 2
+        curve.Samples = samples;
+
+        var data = PlotExport.BuildPlotData(new List<RawTrace.TraceCurve> { curve });
+        Check(data.Series.Count == 1, $"expected 1 series, got {data.Series.Count}");
+        Check(data.Distances.Count == 10, $"expected 10 bins, got {data.Distances.Count}");
+        CheckClose(data.Series[0].Levels[2], 18.0, 1e-9, "bin 2 must keep the spike max");
+        CheckClose(data.Series[0].Levels[1], 10.0, 1e-9, "bin 1 baseline");
+        CheckClose(data.Series[0].Levels[9], 10.0, 1e-9, "last bin (9.75 m sample)");
+
+        // a curve ending early leaves later bins empty in the shared grid
+        var shortCurve = new RawTrace.TraceCurve
+        {
+            TraceName = "Trace1",
+            WavelengthNm = 1550,
+            SamplingPeriodS = 1.0,
+            RangeStartS = 0,
+            RangeEndS = 40,
+            RangeM = 10,
+            CountsPerDb = 1000,
+            Samples = new short[20], // up to 4.75 m only
+        };
+        for (int i = 0; i < 20; i++) shortCurve.Samples[i] = 12_000; // 12 dB
+
+        var both = PlotExport.BuildPlotData(new List<RawTrace.TraceCurve> { curve, shortCurve });
+        Check(both.Series.Count == 2 && both.Distances.Count == 10, "two series on a 10-bin grid");
+        Check(double.IsNaN(both.Series[1].Levels[8]), "bins beyond the short curve must be empty");
+        CheckClose(both.Series[1].Levels[4], 12.0, 1e-9, "short curve keeps its level");
+    }
+
     // --map must draw one raw trace plot per wavelength and overlay the
     // analyzed event markers (plot rows use the same column grid as the ruler)
+    // --excel-trace GOLD: binned chart CSV over the real reference file
+    private static void TestExcelTraceGolden()
+    {
+        string? path = FindGoldenFile("9076.trc");
+        if (path == null)
+        {
+            Console.WriteLine("  [SKIP] reference file not found (put .trc files in .\\reference_trc or set OTDR_TRC_DIR)");
+            return;
+        }
+
+        var curves = RawTrace.ReadCurves(path);
+        var data = PlotExport.BuildPlotData(curves);
+        Check(data.Series.Count == 2, $"expected 2 series, got {data.Series.Count}");
+
+        string dir = Path.Combine(Path.GetTempPath(), "otdr_plot_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            string csvPath = Path.Combine(dir, "trace_plot_test.csv");
+            PlotExport.SaveCsv(csvPath, data);
+
+            // CSV: header + one row per bin, distance + 2 level columns
+            string[] csvLines = File.ReadAllLines(csvPath);
+            Check(csvLines.Length == data.Distances.Count + 1,
+                  $"expected {data.Distances.Count + 1} CSV lines, got {csvLines.Length}");
+            Check(csvLines[0].Contains("distance_m") && csvLines[0].Contains("level_db_1310nm")
+                  && csvLines[0].Contains("level_db_1550nm"), "unexpected CSV header: " + csvLines[0]);
+
+            // house style: ';' separator and comma decimal separator
+            Check(csvLines[1].Split(';').Length == 3, "expected 3 columns in a data row");
+            Check(csvLines[1].Contains(','), "numbers must use the comma decimal separator");
+
+            // the QC connector reflection peak (raw-trace position ~1014 m,
+            // GOLD: sample 3179 at 1014.45 m) must survive the 1 m binning:
+            // its bin level is far above the neighboring fiber baseline
+            int lo = (int)(1010.0 / PlotExport.PlotBinStepM);
+            int hi = (int)(1020.0 / PlotExport.PlotBinStepM);
+            double peakLevel = double.MinValue;
+            for (int b = lo; b <= hi; b++)
+                peakLevel = Math.Max(peakLevel, data.Series[0].Levels[b]);
+            double baseline = data.Series[0].Levels[hi + 290];
+            Check(peakLevel > baseline + 3.0,
+                  $"QC peak must stay visible: {peakLevel:F2} dB vs baseline {baseline:F2} dB");
+        }
+        finally
+        {
+            try { Directory.Delete(dir, true); } catch { }
+        }
+    }
+
     private static void TestMapTracePlotsGolden()
     {
         string? path = FindGoldenFile("9076.trc");
