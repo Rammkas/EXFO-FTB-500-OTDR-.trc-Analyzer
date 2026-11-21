@@ -8,11 +8,18 @@
 //     different fill characters);
 //   - point events drawn as role markers (port / QC connector / splice / end);
 //   - a length row under each section and short event names under markers;
+//   - raw trace plots: the decoded RawSamples curve (dB vs distance) drawn as
+//     an area chart under the schematic, one plot per wavelength, with the
+//     analyzed events overlaid as role markers on the curve (optional — only
+//     when the file contains RawSamples blobs; Render accepts curves or null);
 //   - detail tables below the schematic with all section and event data for
 //     both wavelengths (loss, reflection, attenuation) and DUT totals.
 //
 // The map is built from FiberAnalysis produced by Analyzer, so it shows exactly
 // what the QC verdict logic sees (roles and BUFFER/DUT split are already there).
+// The plots use RawTrace curves: downsampling is peak-preserving (max dB per
+// character column), so narrow reflection spikes remain visible and align with
+// the event markers by distance.
 //
 // RUN:  exfo_trc_analyzer.exe --map <file.trc | folder>
 // ==============================================================================
@@ -41,7 +48,22 @@ public static class MapRenderer
     private const string RoleBuffer = "Buffer spool";
     private const string RoleFiber = "Fiber under test";
 
-    public static string Render(FiberAnalysis f)
+    // raw trace plots (decoded RawSamples curve drawn inline, events overlaid)
+    private const int PlotHeight = 15;         // plot rows
+    private const double PlotEndMargin = 1.15; // show the trace a bit past the last event
+    private const double MinPlotDbSpan = 12.0; // minimum dB window (keeps flat traces readable)
+    private const char PlotFill = '░';         // trace area fill
+    private const char PlotGuide = '¦';        // vertical guide through an event column
+    // candidate ruler steps (km); arrays cannot be const — static readonly
+    private static readonly double[] PlotTickStepsKm = { 0.5, 1, 2, 5 };
+
+    // Plot lines are prefixed with a 6-char dB gutter label plus " dB |" (5
+    // chars). Ruler and event-label lines get the same indent so their columns
+    // line up exactly with the plot area.
+    private const int PlotGutterWidth = 6;
+    private const int PlotPrefixWidth = PlotGutterWidth + 5;
+
+    public static string Render(FiberAnalysis f, List<RawTrace.TraceCurve>? curves = null)
     {
         double maxPos = 0.0;
         foreach (var s in f.Sections)
@@ -151,10 +173,163 @@ public static class MapRenderer
         sb.AppendLine();
         sb.AppendLine($"legend: {MarkPort} port  {MarkConnector} QC connector  {MarkSplice} splice  {MarkEnd} end of fiber | {FillBuffer} buffer spool  {FillFiber} fiber under test");
 
+        AppendTracePlots(sb, f, curves);
+
         AppendSectionTable(sb, f);
         AppendEventTable(sb, f);
         AppendTotals(sb, f);
         return sb.ToString();
+    }
+
+    // --------------------------------------------------------------------------
+    // Raw trace plots: the decoded RawSamples curve (dB levels vs distance)
+    // drawn under the schematic, with the analyzed events overlaid as role
+    // markers. Downsampling is peak-preserving: every plot column shows the
+    // MAXIMUM level of its samples, so narrow reflection spikes are not lost.
+    // --------------------------------------------------------------------------
+    private static void AppendTracePlots(StringBuilder sb, FiberAnalysis f, List<RawTrace.TraceCurve>? curves)
+    {
+        if (curves == null || curves.Count == 0)
+            return;
+
+        // plot x-window: 0 .. last analyzed position + margin
+        double xMax = 0.0;
+        foreach (var e in f.Events)
+            xMax = Math.Max(xMax, e.PosM);
+        foreach (var s in f.Sections)
+            xMax = Math.Max(xMax, s.EndM ?? 0.0);
+        if (xMax <= 0)
+            return;
+        xMax *= PlotEndMargin;
+
+        foreach (var curve in curves)
+        {
+            if (double.IsNaN(curve.DistanceM(0)))
+                continue; // no distance calibration — cannot align with events
+
+            int lastSample = curve.SampleCount;
+            for (int i = 0; i < curve.SampleCount; i++)
+                if (curve.DistanceM(i) > xMax)
+                {
+                    lastSample = i;
+                    break;
+                }
+            if (lastSample < MapWidth)
+                continue; // too few samples in the window for a meaningful plot
+
+            // peak-preserving downsampling: max level per column
+            var peaks = new double[MapWidth];
+            for (int c = 0; c < MapWidth; c++)
+            {
+                int i1 = (int)((long)c * lastSample / MapWidth);
+                int i2 = Math.Max(i1 + 1, (int)((long)(c + 1) * lastSample / MapWidth));
+                double p = double.MinValue;
+                for (int i = i1; i < i2 && i < lastSample; i++)
+                    p = Math.Max(p, curve.LevelDb(i));
+                peaks[c] = p;
+            }
+
+            double top = double.MinValue, bottom = double.MaxValue;
+            foreach (double p in peaks)
+            {
+                top = Math.Max(top, p);
+                bottom = Math.Min(bottom, p);
+            }
+            if (top - bottom < MinPlotDbSpan)
+                bottom = top - MinPlotDbSpan;
+            double span = top - bottom;
+
+            // area under the curve
+            var grid = new char[PlotHeight][];
+            for (int r = 0; r < PlotHeight; r++)
+            {
+                grid[r] = new char[MapWidth];
+                Array.Fill(grid[r], ' ');
+            }
+            var curveRow = new int[MapWidth];
+            for (int c = 0; c < MapWidth; c++)
+            {
+                int row = Math.Clamp((int)Math.Round((top - peaks[c]) / span * (PlotHeight - 1)), 0, PlotHeight - 1);
+                curveRow[c] = row;
+                for (int r = row; r < PlotHeight; r++)
+                    grid[r][c] = PlotFill;
+            }
+
+            // events overlay: vertical guide + role marker at the curve row
+            foreach (var e in f.Events)
+            {
+                int c = (int)Math.Round(e.PosM / xMax * (MapWidth - 1));
+                if (c < 0 || c >= MapWidth)
+                    continue;
+                for (int r = 0; r < curveRow[c]; r++)
+                    if (grid[r][c] == ' ')
+                        grid[r][c] = PlotGuide;
+                grid[curveRow[c]][c] = MarkerFor(e.Role);
+            }
+
+            string title = curve.WavelengthNm > 0 ? $"{curve.WavelengthNm} nm" : curve.TraceName;
+            sb.AppendLine();
+            sb.AppendLine($"Trace plot [{title}]: level dB vs distance, {lastSample} samples in window (max per column)");
+            for (int r = 0; r < PlotHeight; r++)
+            {
+                // dB gutter labels at the top / middle / bottom rows
+                string gutter = (r == 0 || r == PlotHeight - 1 || r == PlotHeight / 2)
+                    ? $"{top - r * span / (PlotHeight - 1),PlotGutterWidth:F1}"
+                    : new string(' ', PlotGutterWidth);
+                sb.AppendLine($"{gutter} dB |{new string(grid[r])}");
+            }
+
+            AppendPlotRuler(sb, f, xMax);
+        }
+
+        sb.AppendLine();
+        sb.AppendLine($"plot legend: {PlotFill} trace area  {PlotGuide} event guide  markers: {MarkPort} port  {MarkConnector} QC  {MarkSplice} splice  {MarkEnd} end");
+    }
+
+    // Distance ruler under a plot: km ticks + event marker labels (collision-shifted)
+    private static void AppendPlotRuler(StringBuilder sb, FiberAnalysis f, double xMax)
+    {
+        double xKm = xMax / 1000.0;
+        double stepKm = PlotTickStepsKm[^1];
+        foreach (double s in PlotTickStepsKm)
+            if (xKm / s <= 12)
+            {
+                stepKm = s;
+                break;
+            }
+
+        string indent = new string(' ', PlotPrefixWidth); // align with plot columns
+
+        var ruler = new char[MapWidth];
+        Array.Fill(ruler, ' ');
+        for (double km = stepKm; km * 1000 < xMax; km += stepKm)
+        {
+            int c = (int)Math.Round(km * 1000.0 / xMax * (MapWidth - 1));
+            if (c <= 0 || c >= MapWidth)
+                continue;
+            ruler[c] = '|';
+            string label = stepKm >= 1 ? $"{km:F0}" : $"{km:F1}";
+            int start = Math.Max(0, c - label.Length);
+            if (ruler[start] == ' ')
+                label.CopyTo(0, ruler, start, label.Length);
+        }
+        sb.AppendLine(indent + new string(ruler));
+
+        // event labels: marker char + position, shifted right on collision
+        var evRow = new char[MapWidth];
+        Array.Fill(evRow, ' ');
+        int lastEnd = -1;
+        foreach (var e in f.Events)
+        {
+            string label = $"{MarkerFor(e.Role)}{e.PosM:F0}";
+            int c = (int)Math.Round(e.PosM / xMax * (MapWidth - 1));
+            int start = Math.Max(Math.Min(c, MapWidth - label.Length), lastEnd + 1);
+            if (start + label.Length >= MapWidth)
+                continue; // no room — the guide line inside the plot is enough
+            label.CopyTo(0, evRow, start, label.Length);
+            lastEnd = start + label.Length - 1;
+        }
+        sb.AppendLine(indent + new string(evRow));
     }
 
     private static char MarkerFor(string role) => role switch

@@ -13,7 +13,8 @@
 //       all EventTable and trace keys with values (needed to confirm EXFO field
 //       names when encountering a new .trc variant)
 //   exfo_trc_analyzer.exe --map <file.trc | folder>  — ASCII link map: a scaled
-//       schematic of the measured path with event markers and detail tables
+//       schematic of the measured path with event markers, raw trace plots
+//       (decoded RawSamples, dB vs distance, events overlaid) and detail tables
 //   exfo_trc_analyzer.exe --file-map <full|short> <file.trc | folder> — structural
 //       map of the raw file itself: full = detailed console map;
 //       short = compact map, node tree saved to <name>.nodetree.json
@@ -211,7 +212,9 @@ internal static class Program
         Console.WriteLine("                                on            = folder containing the .trc files.");
         Console.WriteLine("  --map <file.trc | folder>     ASCII link map: buffer spool -> QC connector ->");
         Console.WriteLine("                                fiber under test, with event distances, losses");
-        Console.WriteLine("                                and reflectances for both wavelengths.");
+        Console.WriteLine("                                and reflectances for both wavelengths; includes");
+        Console.WriteLine("                                raw trace plots (dB vs distance) with event");
+        Console.WriteLine("                                markers overlaid when RawSamples are available.");
         Console.WriteLine("  --file-map full <file.trc | folder>");
         Console.WriteLine("                                Detailed structural map of the raw .trc file:");
         Console.WriteLine("                                record headers, zlib chunk byte ranges, unpacked");
@@ -255,7 +258,8 @@ internal static class Program
     }
 
     // --------------------------------------------------------------------------
-    // --map: ASCII schematic of the analyzed link (one file or a folder of files)
+    // --map: ASCII schematic of the analyzed link (one file or a folder of
+    // files), with raw trace plots (decoded RawSamples) under the schematic.
     // --------------------------------------------------------------------------
     private static void DumpMap(string path)
     {
@@ -273,8 +277,24 @@ internal static class Program
             }
 
             foreach (string file in files)
+            {
+                // raw curves are optional here: if a file has no readable
+                // RawSamples blobs the map is drawn without the plots
+                List<RawTrace.TraceCurve>? curves = null;
+                try
+                {
+                    curves = RawTrace.ReadCurves(file);
+                    if (curves.Count == 0)
+                        curves = null;
+                }
+                catch
+                {
+                    curves = null;
+                }
+
                 foreach (var f in Analyzer.AnalyzeFile(file))
-                    Console.WriteLine(MapRenderer.Render(f));
+                    Console.WriteLine(MapRenderer.Render(f, curves));
+            }
         }
         catch (Exception e)
         {

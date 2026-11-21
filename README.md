@@ -27,14 +27,15 @@ thresholds and writes PASS/FAIL verdicts with reasons.
 - QC input-connector check (optional, `check_qc_connector`).
 - Warnings when the `has_buffer_spool` setting contradicts the actual trace.
 - `--dump-keys` diagnostic mode to inspect the raw EXFO field names of any file.
-- `--map` mode: ASCII schematic of the measured link with event markers and
+- `--map` mode: ASCII schematic of the measured link with event markers,
+  raw trace plots (decoded `RawSamples` curve with events overlaid) and
   detail tables.
 - `--file-map full|short` mode: structural map of the raw `.trc` file (record
   headers, zlib chunk ranges, node tree; `short` also exports the tree to JSON).
 - `--raw-trace` mode: export of the point-by-point trace curves from the
   `RawSamples` blobs to CSV (Int16 samples, 1024 counts per dB).
 - Running with no parameters prints the full flag reference.
-- 34 regression tests, including GOLD tests against real reference files.
+- 35 regression tests, including GOLD tests against real reference files.
 
 ## Build & run
 
@@ -110,6 +111,26 @@ PORT       QC
 legend: ▐ port  ● QC connector  × splice  ◆ end of fiber | ▒ buffer spool  ═ fiber under test
 ```
 
+Under the schematic, `--map` also draws a raw trace plot per wavelength — the
+decoded `RawSamples` curve (dB level vs distance) as an area chart with the
+analyzed events overlaid as markers on the curve. Downsampling is
+peak-preserving (max dB per character column), so narrow reflection spikes stay
+visible:
+
+```
+Trace plot [1310 nm]: level dB vs distance, 30085 samples in window (max per column)
+  28.5 dB |▐         ●                                                                        ¦
+       dB |░         ░                                                                        ¦
+       dB |░         ░                                                                        ¦
+       dB |░         ░                                                                        ◆   ← end reflection
+  18.5 dB |░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░     ░
+   8.5 dB |░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
+                    1|        2|        3|        4|       5|        6|        7|        8|        9|
+           ▐0        ●1011                                                                    ◆8347
+```
+
+Files without readable `RawSamples` blobs simply get the map without plots.
+
 followed by tables of all sections and events (loss / reflection / attenuation
 for both wavelengths) and the fiber-under-test totals with FAIL/WARNING reasons.
 
@@ -159,8 +180,8 @@ from the reference files: Int16 little-endian samples, **1024 counts per dB**
 `RangeStart + i × SamplingPeriod` seconds, converted to meters via the trace's
 `Range`. Cross-checked: the QC-connector reflection peak lands at ~1014 m
 (EventTable: 1010.9 m), the fiber-end peak at ~8348 m (EventTable: 8349.3 m),
-and the decoded slopes match the GOLD attenuations (0.32 dB/km @1310,
-0.18 dB/km @1550). The CSV folder follows `--source_output`, like the other
+and the decoded slopes match the GOLD attenuations (0.32 dB/km at 1310 nm,
+0.18 dB/km at 1550 nm). The CSV folder follows `--source_output`, like the other
 reports.
 
 ## Configuration (`otdr_config.txt`)
@@ -256,7 +277,7 @@ ExfoTrcAnalyzer/          main tool
   MapRenderer.cs          --map: ASCII link schematic
   FileMap.cs              --file-map: raw-file structural map + tree JSON export
   RawTrace.cs             --raw-trace: point-by-point trace curve CSV export
-ExfoTrcAnalyzer.Tests/    regression tests (34, incl. GOLD)
+ExfoTrcAnalyzer.Tests/    regression tests (35, incl. GOLD)
 ```
 
 ## Disclaimer

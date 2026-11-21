@@ -89,6 +89,7 @@ internal static class TestRunner
             ("GOLD 9084.trc", () => TestGolden("9084.trc", 7340.9, 2.427, 0.331, 7338.8, 1.353, 0.184, 0.259, 0.132)),
             ("GOLD 9085.trc", () => TestGolden("9085.trc", 7338.7, 2.432, 0.331, 7336.5, 1.372, 0.187, 0.480, 0.352)),
             ("GOLD 9076.trc raw trace curves (--raw-trace)", TestRawTraceGolden),
+            ("GOLD 9076.trc map trace plots (--map)", TestMapTracePlotsGolden),
         };
 
         int failed = 0;
@@ -659,6 +660,37 @@ internal static class TestRunner
     // GOLD for the --raw-trace export: RawSamples blob encoding verified on
     // 9076.trc — Int16 LE samples, 1024 counts per dB, uniform time axis
     // (see RawTrace.cs file header for the cross-checks)
+    // --map must draw one raw trace plot per wavelength and overlay the
+    // analyzed event markers (plot rows use the same column grid as the ruler)
+    private static void TestMapTracePlotsGolden()
+    {
+        string? path = FindGoldenFile("9076.trc");
+        if (path == null)
+        {
+            Console.WriteLine("  [SKIP] reference file not found (put .trc files in .\\reference_trc or set OTDR_TRC_DIR)");
+            return;
+        }
+
+        var fibers = Analyzer.AnalyzeFile(path);
+        var curves = RawTrace.ReadCurves(path);
+        Check(fibers.Count == 1 && curves.Count == 2,
+              $"expected 1 fiber and 2 curves, got {fibers.Count}/{curves.Count}");
+
+        string map = MapRenderer.Render(fibers[0], curves);
+        Check(map.Contains("Trace plot [1310 nm]"), "missing 1310 nm trace plot");
+        Check(map.Contains("Trace plot [1550 nm]"), "missing 1550 nm trace plot");
+        Check(map.Contains("plot legend"), "missing plot legend");
+
+        // the QC event marker and the end marker must appear inside the plots
+        // (the ruler/event rows carry the position labels)
+        Check(map.Contains("●1011") || map.Contains("●1010"), "QC marker missing in plot rows");
+        Check(map.Contains("◆8347") || map.Contains("◆8348"), "end marker missing in plot rows");
+
+        // Render without curves (files lacking RawSamples) must stay valid
+        string plain = MapRenderer.Render(fibers[0]);
+        Check(!plain.Contains("Trace plot"), "plots must be absent when no curves are passed");
+    }
+
     private static void TestRawTraceGolden()
     {
         string? path = FindGoldenFile("9076.trc");
