@@ -4,7 +4,7 @@
 // WHAT IT DOES: holds the default values and can override them from an
 // otdr_config.txt file. File format: "parameter = value"; lines starting with
 // # ; // are comments; numbers accept both '.' and ',' as decimal separator;
-// bool accepts True/False/1/0/yes/no/да/нет etc. The file is looked for first in
+// bool accepts True/False/1/0/yes/no/on/off etc. The file is looked for first in
 // the folder with the .trc files, then next to the EXE. If the file is missing —
 // built-in defaults are used and a template file (ConfigTemplate) is created in
 // the .trc folder for manual editing in Notepad.

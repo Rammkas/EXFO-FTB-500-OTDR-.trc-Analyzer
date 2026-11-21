@@ -76,6 +76,12 @@ internal static class Program
             }
         }
 
+        // Windows console quirk: quoting a path that ends with a backslash — "C:\dir\" —
+        // turns the trailing \" into an escaped quote, so the argument arrives with a
+        // stray trailing '"'. A path cannot legitimately end with '"', so trim it.
+        for (int i = 0; i < positional.Count; i++)
+            positional[i] = positional[i].TrimEnd('"');
+
         if (positional.Count >= 1 && positional[0] == "--dump-keys")
         {
             if (positional.Count < 2)

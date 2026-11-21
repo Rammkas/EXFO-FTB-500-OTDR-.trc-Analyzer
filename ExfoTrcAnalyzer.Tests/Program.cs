@@ -129,9 +129,9 @@ internal static class TestRunner
     private static void TestParseBool()
     {
         Check(Config.ParseBool("True", out bool b) && b, "True");
-        Check(Config.ParseBool("да", out b) && b, "да (Russian yes, kept for compatibility)");
+        Check(Config.ParseBool("yes", out b) && b, "yes");
         Check(Config.ParseBool("0", out b) && !b, "0");
-        Check(Config.ParseBool("нет", out b) && !b, "нет (Russian no, kept for compatibility)");
+        Check(Config.ParseBool("off", out b) && !b, "off");
         Check(!Config.ParseBool("maybe-not", out _), "garbage must be rejected");
     }
 
