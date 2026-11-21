@@ -1,0 +1,183 @@
+// ==============================================================================
+// Program.cs — entry point and CLI of the exfo_trc_analyzer utility.
+//
+// USAGE:
+//   exfo_trc_analyzer.exe [folder_with_.trc]         — parse and write CSV reports
+//   exfo_trc_analyzer.exe --dump-keys <file.trc>     — format diagnostics: prints
+//       all EventTable and trace keys with values (needed to confirm EXFO field
+//       names when encountering a new .trc variant)
+//
+// WORKFLOW:
+//   1) Config.Load — settings from otdr_config.txt (or defaults + template creation);
+//      IMPORTANT about has_buffer_spool: measuring WITHOUT a buffer spool (fiber
+//      plugged directly into the fixed launcher) requires has_buffer_spool=False.
+//      Leaving it True for such a measurement: a 800..1200 m fiber is treated as a
+//      buffer and excluded from the check (a warning appears in the CSV, but the
+//      verdict would be based on empty data).
+//   2) iterate over *.trc in the folder (ordered by file name, Ordinal); for each —
+//      Analyzer.AnalyzeFile (TrcParser -> tree -> sections/events -> verdict);
+//   3) every file is processed in try/catch: a corrupt file does not stop the batch;
+//   4) three CSVs are written to the CURRENT working folder (each write in
+//      try/catch — a CSV locked open in Excel must not crash the finished results):
+//      summary_fibers.csv  — one row per fiber: length/loss/attenuation at 1310 and
+//                            1550, QC connector loss, verdict and reasons,
+//                            warnings (e.g. has_buffer_spool contradicting the
+//                            actual trace);
+//      sections_detail.csv — per section: role (buffer/DUT), boundaries, data of
+//                            both wavelengths, section verdict;
+//      events_detail.csv   — per point event: role on the bench (port / QC
+//                            connector / splice / end), losses and reflections of
+//                            both wavelengths.
+//
+// The analysis itself lives in the Config/TrcParser/Analyzer/Csv modules — this
+// file is only the CLI, console output and CSV row assembly.
+// ==============================================================================
+using System.Text;
+
+namespace ExfoTrcAnalyzer;
+
+// ==============================================================================
+// Thin CLI over the Config / TrcParser / Analyzer / Csv modules.
+// Usage:
+//   exfo_trc_analyzer.exe [folder_with_.trc]
+//   exfo_trc_analyzer.exe --dump-keys <file.trc>   — format diagnostics
+// ==============================================================================
+internal static class Program
+{
+    private static void Main(string[] args)
+    {
+        Console.OutputEncoding = Encoding.UTF8;
+
+        if (args.Length >= 1 && args[0] == "--dump-keys")
+        {
+            if (args.Length < 2)
+            {
+                Console.WriteLine("Usage: exfo_trc_analyzer.exe --dump-keys <file.trc>");
+                return;
+            }
+            DumpKeys(args[1]);
+            return;
+        }
+
+        string inputDir = args.Length > 0 ? args[0] : ".";
+        Config.Load(inputDir);
+        ProcessFolder(inputDir);
+    }
+
+    private static void DumpKeys(string filepath)
+    {
+        try
+        {
+            Console.WriteLine(Analyzer.DumpTrc(filepath));
+        }
+        catch (Exception e)
+        {
+            Console.WriteLine($"[ERROR] {filepath}: {e.Message}");
+        }
+    }
+
+    // --------------------------------------------------------------------------
+    // Main folder processing
+    // --------------------------------------------------------------------------
+    private static void ProcessFolder(string inputDir = ".")
+    {
+        var trcFiles = Directory.GetFiles(inputDir, "*.trc").OrderBy(f => f, StringComparer.Ordinal).ToList();
+        if (trcFiles.Count == 0)
+        {
+            Console.WriteLine($"No .trc files found in folder '{inputDir}'");
+            return;
+        }
+
+        var summaryRows = new List<string[]>();
+        var sectionRows = new List<string[]>();
+        var eventRows = new List<string[]>();
+
+        foreach (string filepath in trcFiles)
+        {
+            string filename = Path.GetFileName(filepath);
+            try
+            {
+                var fibers = Analyzer.AnalyzeFile(filepath);
+                if (fibers.Count == 0)
+                    Console.WriteLine($"[WARN] {filename}: no fibers found in the file (OtdrData/Fibers).");
+
+                foreach (var f in fibers)
+                {
+                    foreach (var s in f.Sections)
+                        sectionRows.Add(new[]
+                        {
+                            filename, f.FiberId, s.Index.ToString(), s.Role,
+                            Csv.Fmt(s.StartM, 1), Csv.Fmt(s.EndM, 1),
+                            Csv.Fmt(s.S13.LengthM, 1), Csv.Fmt(s.S13.LossDb, 3), Csv.Fmt(s.S13.AttenDbKm, 3),
+                            Csv.Fmt(s.S15.LengthM, 1), Csv.Fmt(s.S15.LossDb, 3), Csv.Fmt(s.S15.AttenDbKm, 3),
+                            s.Verdict, string.Join("; ", s.Reasons),
+                        });
+
+                    foreach (var e in f.Events)
+                        eventRows.Add(new[]
+                        {
+                            filename, f.FiberId, e.Index.ToString(), e.Role, Csv.Fmt(e.PosM, 1),
+                            Csv.Fmt(e.L13, 3), Csv.Fmt(e.R13, 1), Csv.Fmt(e.L15, 3), Csv.Fmt(e.R15, 1),
+                            e.Verdict, string.Join("; ", e.Reasons),
+                        });
+
+                    summaryRows.Add(new[]
+                    {
+                        filename, f.FiberId,
+                        Csv.Fmt(f.Len13, 1), Csv.Fmt(f.Loss13, 3), Csv.Fmt(f.Att13, 3),
+                        Csv.Fmt(f.Len15, 1), Csv.Fmt(f.Loss15, 3), Csv.Fmt(f.Att15, 3),
+                        Csv.Fmt(f.QcLoss13, 3), Csv.Fmt(f.QcLoss15, 3),
+                        f.Verdict, string.Join(" | ", f.Fails), string.Join(" | ", f.Warnings),
+                    });
+
+                    Console.WriteLine($"[OK] {filename} [{f.FiberId}] -> 1310: {f.Len13:F1} m | 1550: {f.Len15:F1} m | Verdict: {f.Verdict}");
+                    foreach (string w in f.Warnings)
+                        Console.WriteLine($"[WARN] {filename} [{f.FiberId}]: {w}");
+                }
+            }
+            catch (Exception e)
+            {
+                Console.WriteLine($"[ERROR] {filename}: {e.Message}");
+            }
+        }
+
+        TrySaveCsv("summary_fibers.csv", new[]
+        {
+            "File", "Fiber (ID)",
+            "Length 1310 (m)", "Loss 1310 (dB)", "Attenuation 1310 (dB/km)",
+            "Length 1550 (m)", "Loss 1550 (dB)", "Attenuation 1550 (dB/km)",
+            "QC connector 1310 (dB)", "QC connector 1550 (dB)",
+            "Verdict", "Rejection reasons", "Warnings",
+        }, summaryRows);
+
+        TrySaveCsv("sections_detail.csv", new[]
+        {
+            "File", "Fiber (ID)", "Section #", "Role", "Start (m)", "End (m)",
+            "Length 1310 (m)", "Loss 1310 (dB)", "Attenuation 1310 (dB/km)",
+            "Length 1550 (m)", "Loss 1550 (dB)", "Attenuation 1550 (dB/km)",
+            "Verdict", "Reason",
+        }, sectionRows);
+
+        TrySaveCsv("events_detail.csv", new[]
+        {
+            "File", "Fiber (ID)", "Event #", "Bench role", "Position (m)",
+            "Loss 1310 (dB)", "Reflection 1310 (dB)", "Loss 1550 (dB)",
+            "Reflection 1550 (dB)", "Verdict", "Reason",
+        }, eventRows);
+
+        Console.WriteLine("\nDone! Created tables: summary_fibers.csv, sections_detail.csv, events_detail.csv");
+    }
+
+    // CSV writing must not crash the program (e.g. when the file is open in Excel)
+    private static void TrySaveCsv(string filename, string[] headers, List<string[]> rows)
+    {
+        try
+        {
+            Csv.SaveCsv(filename, headers, rows);
+        }
+        catch (Exception e)
+        {
+            Console.WriteLine($"[ERROR] Failed to write '{filename}': {e.Message}");
+        }
+    }
+}

@@ -1,0 +1,16 @@
+# Build output
+bin/
+obj/
+
+# IDE
+.vs/
+.vscode/
+.idea/
+
+# Test / analysis artifacts
+*.csv
+otdr_config.txt
+
+# Measurement data — do not publish reflectograms by accident
+*.trc
+reference_trc/
